@@ -5,6 +5,8 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FolderSync.Core
 {
@@ -34,6 +36,9 @@ namespace FolderSync.Core
 
         // Deferred load control
         private bool _snapshotLoaded;
+
+        // Parallel copy configuration (bounded to avoid overwhelming IO subsystem)
+        private const int MaxCopyConcurrency = 8; // can be tuned or exposed later
 
         #region Constructors / Factory
 
@@ -137,6 +142,55 @@ namespace FolderSync.Core
             }
         }
 
+        // New asynchronous variant performing parallel file copy to improve throughput.
+        public async Task SyncFolderAsync(CancellationToken cancellationToken = default)
+        {
+            if (!Monitor.TryEnter(_syncLock))
+            {
+                Logger.Warn("Async sync attempt skipped; previous sync still running.");
+                return;
+            }
+
+            try
+            {
+                EnsurePreviousSnapshotLoaded();
+                var oldSnapshot = _previousSnapshot;
+
+                var currentSnapshot = _snapshotProvider.GetSnapshot(_sourceFolder);
+                await CopyOrUpdateFilesAsync(currentSnapshot, cancellationToken).ConfigureAwait(false);
+                // Maintenance remains synchronous; can be made async if needed.
+                _replicaMaintenance.DeleteExtraneousFiles(_sourceFolder, _replicaFolder, currentSnapshot);
+                _replicaMaintenance.PruneEmptyDirectories(_replicaFolder);
+
+                bool changed = !SnapshotsEqual(oldSnapshot, currentSnapshot);
+                _previousSnapshot = currentSnapshot;
+
+                if (changed)
+                {
+                    SaveSnapshot();
+                    Logger.Info("Async synchronization cycle completed (changes persisted).");
+                }
+                else
+                {
+                    Logger.Debug("No changes detected (async); snapshot persistence skipped.");
+                    Logger.Info("Async synchronization cycle completed (no changes).");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Warn("Async synchronization cancelled.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Unexpected error during async synchronization cycle", ex);
+                throw;
+            }
+            finally
+            {
+                Monitor.Exit(_syncLock);
+            }
+        }
+
         #region Private Methods
 
         private void EnsurePreviousSnapshotLoaded()
@@ -181,6 +235,58 @@ namespace FolderSync.Core
                     Logger.Error($"Failed copying '{src}' -> '{dst}': {ex.Message}", ex);
                 }
             }
+        }
+
+        // Parallel async variant. Uses Task.Run around synchronous copy for now; could be replaced by true async I/O if needed.
+        private async Task CopyOrUpdateFilesAsync(Dictionary<string, DateTime> currentSnapshot, CancellationToken ct)
+        {
+            var tasks = new List<Task>();
+            using var semaphore = new SemaphoreSlim(MaxCopyConcurrency);
+
+            foreach (var (relativePath, currentLastWriteUtc) in currentSnapshot)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var src = Path.Combine(_sourceFolder, relativePath);
+                var dst = Path.Combine(_replicaFolder, relativePath);
+
+                var needsCopy =
+                    !_previousSnapshot.TryGetValue(relativePath, out var prevWriteUtc) ||
+                    prevWriteUtc != currentLastWriteUtc ||
+                    !File.Exists(dst);
+
+                if (!needsCopy)
+                    continue;
+
+                await semaphore.WaitAsync(ct).ConfigureAwait(false);
+
+                tasks.Add(Task.Run(() =>
+                {
+                    try
+                    {
+                        _fileCopyService.CopyFile(src, dst, overwrite: true, retries: 2, retryDelayMs: 50);
+                        if (!_previousSnapshot.ContainsKey(relativePath))
+                            Logger.Info($"Copied NEW file '{src}' -> '{dst}' (async).");
+                        else
+                            Logger.Info($"Updated file '{src}' -> '{dst}' (async).");
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        Logger.Warn($"Skipped copy (source vanished mid-operation): '{src}' (async).");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"Failed copying '{src}' -> '{dst}' (async): {ex.Message}", ex);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }, ct));
+            }
+
+            // Await all copy operations.
+            await Task.WhenAll(tasks).ConfigureAwait(false);
         }
 
         private static bool SnapshotsEqual(Dictionary<string, DateTime> a, Dictionary<string, DateTime> b)
