@@ -1,6 +1,6 @@
 ﻿using CommandLine;
 using FolderSync.Core;
-using FolderSync.App.AgrumentsParser;
+using FolderSync.App.ArgumentsParser;
 
 namespace FolderSync.App
 {
