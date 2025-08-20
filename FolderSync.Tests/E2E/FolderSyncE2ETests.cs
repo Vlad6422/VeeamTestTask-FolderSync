@@ -151,7 +151,18 @@ namespace FolderSync.Tests.E2E
         {
             return Directory
                 .GetFiles(root, "*", SearchOption.AllDirectories)
-                .ToDictionary(f => Path.GetRelativePath(root, f).Replace('\\', '/'), f => File.ReadAllText(f));
+                .Select(full => Path.GetRelativePath(root, full).Replace('\\', '/'))
+                .Where(rel => !IsInternalStateFile(rel))
+                .ToDictionary(rel => rel, rel => File.ReadAllText(Path.Combine(root, rel)));
+        }
+
+        private static bool IsInternalStateFile(string relativePath)
+        {
+            if (relativePath.Contains('/')) return false;
+            if (!relativePath.StartsWith(".foldersync.", StringComparison.OrdinalIgnoreCase)) return false;
+            return relativePath.EndsWith(".snapshot.json", StringComparison.OrdinalIgnoreCase)
+                   || relativePath.EndsWith(".snaps", StringComparison.OrdinalIgnoreCase)
+                   || relativePath.EndsWith(".snap", StringComparison.OrdinalIgnoreCase);
         }
 
         public void Dispose()

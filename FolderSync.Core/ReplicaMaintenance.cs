@@ -3,7 +3,7 @@ using log4net;
 
 namespace FolderSync.Core
 {
-    internal sealed class ReplicaMaintenance : IReplicaMaintenance
+    public sealed class ReplicaMaintenance : IReplicaMaintenance
     {
         private static readonly ILog Logger = LogManager.GetLogger(typeof(ReplicaMaintenance));
 
