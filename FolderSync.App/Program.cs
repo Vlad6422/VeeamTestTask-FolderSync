@@ -18,10 +18,30 @@ namespace FolderSync.App
             Console.WriteLine($"Source path   : {opts.sourcePath}");
             Console.WriteLine($"Replica path  : {opts.replicaFolder}");
             Console.WriteLine($"Sync interval : {opts.syncInterval} miliseconds");
-            Console.WriteLine($"Log file path : {opts.log}");
+            Console.WriteLine($"Log folder path : {opts.log}");
 
-            var syncFolder = new FolderSynchronizer(opts.sourcePath, opts.replicaFolder, opts.syncInterval, opts.log);
+
+            try
+            {
+                var syncFolder = new FolderSynchronizer(opts.sourcePath, opts.replicaFolder, opts.syncInterval, opts.log);
+                try
+                {
+                    syncFolder.SyncFolder();
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Error during synchronization: {ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error during initialization: {ex.Message}");
+                return;
+
+            }
+
         }
+
 
         static void HandleErrors(IEnumerable<Error> errs)
         {

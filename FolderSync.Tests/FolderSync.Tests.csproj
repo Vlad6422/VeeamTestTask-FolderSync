@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -19,6 +19,14 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="E2E\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FolderSync.Core\FolderSync.Core.csproj" />
   </ItemGroup>
 
 </Project>
