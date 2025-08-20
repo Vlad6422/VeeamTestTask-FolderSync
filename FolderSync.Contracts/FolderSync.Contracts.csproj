@@ -2,13 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <RootNamespace>VeeamTestTask_FolderSync.Core</RootNamespace>
+    <RootNamespace>FolderSync.Contracts</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\VeeamTestTask-FolderSync.Contracts\FolderSync.Contracts.csproj" />
-  </ItemGroup>
 
 </Project>

@@ -1,5 +1,5 @@
-﻿using VeeamTestTask_FolderSync.Contracts;
-namespace VeeamTestTask_FolderSync.Core
+﻿using FolderSync.Contracts;
+namespace FolderSync.Core
 {
     public class FolderSynchronizer : ISyncFolder
     {

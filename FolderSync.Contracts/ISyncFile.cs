@@ -1,4 +1,4 @@
-﻿namespace VeeamTestTask_FolderSync.Contracts
+﻿namespace FolderSync.Contracts
 {
     interface ISyncFile
     {

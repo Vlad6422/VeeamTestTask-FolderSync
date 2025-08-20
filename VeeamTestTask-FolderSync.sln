@@ -3,13 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36414.22
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.Tests", "VeeamTestTask-FolderSync.Tests\FolderSync.Tests.csproj", "{0C5D31C9-522B-47A7-A3CB-DBB0B5F841D8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.Tests", "FolderSync.Tests\FolderSync.Tests.csproj", "{0C5D31C9-522B-47A7-A3CB-DBB0B5F841D8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.App", "VeeamTestTask-FolderSync\FolderSync.App.csproj", "{FB6DBE17-AC3C-4596-7C83-7F874BBF4497}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.App", "FolderSync.App\FolderSync.App.csproj", "{FB6DBE17-AC3C-4596-7C83-7F874BBF4497}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.Contracts", "VeeamTestTask-FolderSync.Contracts\FolderSync.Contracts.csproj", "{950A07E8-1E9C-408B-8930-E163C2211047}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.Contracts", "FolderSync.Contracts\FolderSync.Contracts.csproj", "{950A07E8-1E9C-408B-8930-E163C2211047}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.Core", "VeeamTestTask-FolderSync.Core\FolderSync.Core.csproj", "{9698EAA6-8B46-4D4E-868B-A80025FD2388}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FolderSync.Core", "FolderSync.Core\FolderSync.Core.csproj", "{9698EAA6-8B46-4D4E-868B-A80025FD2388}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -1,6 +1,6 @@
 ﻿using CommandLine;
 
-namespace VeeamTestTask_FolderSync
+namespace FolderSync.App.AgrumentsParser
 {
     internal class ConsoleArguments
     {

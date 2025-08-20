@@ -1,4 +1,4 @@
-namespace VeeamTestTask_FolderSync.Tests
+namespace FolderSync.Tests
 {
     public class UnitTest1
     {
