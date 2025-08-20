@@ -1,6 +1,6 @@
 ﻿using CommandLine;
 
-namespace FolderSync.App.AgrumentsParser
+namespace FolderSync.App.ArgumentsParser
 {
     internal class ConsoleArguments
     {
