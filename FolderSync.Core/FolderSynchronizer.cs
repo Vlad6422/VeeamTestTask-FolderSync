@@ -30,7 +30,7 @@ namespace FolderSync.Core
                     .FirstOrDefault(a => a.Name == "FileAppender");
                 if (fileAppender != null)
                 {
-                    fileAppender.File = logFolderPath + "\\file.log";
+                    fileAppender.File = Path.Combine(logFolderPath, "file.log");
                     fileAppender.ActivateOptions();
                 }
 
