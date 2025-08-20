@@ -127,7 +127,7 @@ namespace FolderSync.Core
                     if (!_previousSnapshot.ContainsKey(relativePath))
                         Logger.Info($"Copied NEW file '{src}' -> '{dst}'.");
                     else
-                        Logger.Info($"{src} -> {dst}");
+                        Logger.Info($"Updated file '{src}' -> '{dst}'.");
                 }
                 catch (FileNotFoundException)
                 {
