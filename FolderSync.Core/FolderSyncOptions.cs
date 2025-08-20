@@ -15,7 +15,7 @@ namespace FolderSync.Core
             LogPath = logPath;
         }
 
-        internal (string Source, string Replica, int IntervalMs, string LogFile) NormalizeAndValidate()
+        public (string Source, string Replica, int IntervalMs, string LogFile) NormalizeAndValidate()
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(SourceFolder, nameof(SourceFolder));
             ArgumentException.ThrowIfNullOrWhiteSpace(ReplicaFolder, nameof(ReplicaFolder));

@@ -2,7 +2,7 @@ using FolderSync.Contracts;
 
 namespace FolderSync.Core
 {
-    internal sealed class FolderSnapshotProvider : IFolderSnapshotProvider
+    public sealed class FolderSnapshotProvider : IFolderSnapshotProvider
     {
         public Dictionary<string, DateTime> GetSnapshot(string folderPath)
         {

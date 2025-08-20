@@ -2,7 +2,7 @@ using FolderSync.Contracts;
 
 namespace FolderSync.Core
 {
-    internal sealed class RetryingFileCopyService : IFileCopyService
+    public sealed class RetryingFileCopyService : IFileCopyService
     {
         public void CopyFile(string sourceFilePath, string destinationFilePath, bool overwrite, int retries = 0, int retryDelayMs = 0)
         {
