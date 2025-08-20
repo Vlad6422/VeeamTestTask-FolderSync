@@ -22,10 +22,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="E2E\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\FolderSync.Core\FolderSync.Core.csproj" />
   </ItemGroup>
 
