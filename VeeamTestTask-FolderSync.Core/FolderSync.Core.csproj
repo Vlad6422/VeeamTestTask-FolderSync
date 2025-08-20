@@ -7,4 +7,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\VeeamTestTask-FolderSync.Contracts\FolderSync.Contracts.csproj" />
+  </ItemGroup>
+
 </Project>
