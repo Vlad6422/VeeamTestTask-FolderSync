@@ -17,8 +17,10 @@ namespace FolderSync.Core
         public void DeleteExtraneousFiles(string sourceRoot, string replicaRoot, IReadOnlyDictionary<string, DateTime> currentSourceSnapshot)
         {
             var replicaSnapshot = _snapshotProvider.GetSnapshot(replicaRoot);
+
             var extraneous = replicaSnapshot.Keys
                 .Except(currentSourceSnapshot.Keys, StringComparer.OrdinalIgnoreCase)
+                .Where(r => !IsInternalStateFile(r)) // keep internal snapshot json
                 .ToList();
 
             foreach (var relative in extraneous)
@@ -54,6 +56,16 @@ namespace FolderSync.Core
             {
                 Logger.Warn($"Directory pruning encountered an issue: {ex.Message}");
             }
+        }
+
+        // Recognize the internal snapshot file (root-level)
+        private static bool IsInternalStateFile(string relativePath)
+        {
+            // Root-level name like ".foldersync.<hash>.snapshot.json"
+            return relativePath.StartsWith(".foldersync.", StringComparison.OrdinalIgnoreCase)
+                   && relativePath.EndsWith(".snapshot.json", StringComparison.OrdinalIgnoreCase)
+                   && !relativePath.Contains(Path.DirectorySeparatorChar) // ensure at root
+                   && !relativePath.Contains(Path.AltDirectorySeparatorChar);
         }
     }
 }

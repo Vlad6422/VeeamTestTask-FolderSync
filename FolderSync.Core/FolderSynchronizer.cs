@@ -1,8 +1,10 @@
 ﻿using FolderSync.Contracts;
 using log4net;
 using log4net.Config;
-using log4net.Repository;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace FolderSync.Core
 {
@@ -22,9 +24,19 @@ namespace FolderSync.Core
         private Dictionary<string, DateTime> _previousSnapshot = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _syncLock = new();
 
+        // Snapshot persistence
+        private readonly string _snapshotStatePath;
+        private readonly JsonSerializerOptions _jsonOptions = new()
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        // Deferred load control
+        private bool _snapshotLoaded;
+
         #region Constructors / Factory
 
-        // Primary DI-friendly constructor
         public FolderSynchronizer(
             FolderSyncOptions options,
             IFolderSnapshotProvider snapshotProvider,
@@ -32,16 +44,16 @@ namespace FolderSync.Core
             IReplicaMaintenance replicaMaintenance)
         {
             (_sourceFolder, _replicaFolder, _syncIntervalMilliseconds, _logFilePath) = options.NormalizeAndValidate();
-
             _snapshotProvider = snapshotProvider;
             _fileCopyService = fileCopyService;
             _replicaMaintenance = replicaMaintenance;
 
+            _snapshotStatePath = BuildSnapshotPath(_replicaFolder, _sourceFolder);
+
             ConfigureLogging();
-            Logger.Info($"FolderSynchronizer initialized. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalMs={_syncIntervalMilliseconds}, LogFile='{_logFilePath}'");
+            Logger.Info($"FolderSynchronizer initialized. Source='{_sourceFolder}', Replica='{_replicaFolder}', StateFile='{_snapshotStatePath}'");
         }
 
-        // Backwards-compatible convenience constructor
         public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logPath)
             : this(new FolderSyncOptions(sourceFolder, replicaFolder, syncInterval, logPath),
                 snapshotProvider: new FolderSnapshotProvider(),
@@ -72,7 +84,6 @@ namespace FolderSync.Core
             }
             catch (Exception ex)
             {
-                // Last resort logging
                 Logger.Error("Exception during logging configuration", ex);
                 throw;
             }
@@ -90,13 +101,30 @@ namespace FolderSync.Core
 
             try
             {
+                EnsurePreviousSnapshotLoaded();
+
+                // Keep reference to old snapshot for change detection.
+                var oldSnapshot = _previousSnapshot;
+
                 var currentSnapshot = _snapshotProvider.GetSnapshot(_sourceFolder);
                 CopyOrUpdateFiles(currentSnapshot);
                 _replicaMaintenance.DeleteExtraneousFiles(_sourceFolder, _replicaFolder, currentSnapshot);
                 _replicaMaintenance.PruneEmptyDirectories(_replicaFolder);
 
+                bool changed = !SnapshotsEqual(oldSnapshot, currentSnapshot);
+
                 _previousSnapshot = currentSnapshot;
-                Logger.Info("Synchronization cycle completed.");
+
+                if (changed)
+                {
+                    SaveSnapshot();
+                    Logger.Info("Synchronization cycle completed (changes persisted).");
+                }
+                else
+                {
+                    Logger.Debug("No changes detected; snapshot persistence skipped.");
+                    Logger.Info("Synchronization cycle completed (no changes).");
+                }
             }
             catch (Exception ex)
             {
@@ -110,6 +138,16 @@ namespace FolderSync.Core
         }
 
         #region Private Methods
+
+        private void EnsurePreviousSnapshotLoaded()
+        {
+            if (_snapshotLoaded)
+                return;
+
+            LoadPreviousSnapshot();
+            _snapshotLoaded = true;
+        }
+
         private void CopyOrUpdateFiles(Dictionary<string, DateTime> currentSnapshot)
         {
             foreach (var (relativePath, currentLastWriteUtc) in currentSnapshot)
@@ -144,6 +182,92 @@ namespace FolderSync.Core
                 }
             }
         }
+
+        private static bool SnapshotsEqual(Dictionary<string, DateTime> a, Dictionary<string, DateTime> b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a.Count != b.Count) return false;
+
+            foreach (var kv in a)
+            {
+                if (!b.TryGetValue(kv.Key, out var dt) || dt != kv.Value)
+                    return false;
+            }
+            return true;
+        }
+
+        private static string BuildSnapshotPath(string replicaRoot, string sourceRoot)
+        {
+            var fullSource = Path.GetFullPath(sourceRoot);
+            using var sha = SHA256.Create();
+            var hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(fullSource));
+            var hash = Convert.ToHexString(hashBytes, 0, 16);
+            return Path.Combine(replicaRoot, $".foldersync.{hash}.snapshot.json");
+        }
+
+        private void LoadPreviousSnapshot()
+        {
+            try
+            {
+                if (!File.Exists(_snapshotStatePath))
+                {
+                    Logger.Debug("No previous snapshot state file found; starting fresh.");
+                    return;
+                }
+
+                var json = File.ReadAllText(_snapshotStatePath);
+                var state = JsonSerializer.Deserialize<SnapshotState>(json, _jsonOptions);
+                if (state?.Files == null)
+                {
+                    Logger.Warn("Snapshot state file present but empty or malformed; starting fresh.");
+                    return;
+                }
+
+                _previousSnapshot = state.Files
+                    .Where(kv => kv.Value > 0)
+                    .ToDictionary(
+                        kv => kv.Key,
+                        kv => DateTime.SpecifyKind(new DateTime(kv.Value, DateTimeKind.Utc), DateTimeKind.Utc),
+                        StringComparer.OrdinalIgnoreCase);
+
+                Logger.Info($"Loaded previous snapshot state ({_previousSnapshot.Count} entries).");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to load previous snapshot state: {ex.Message}. Starting fresh.");
+                _previousSnapshot = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private void SaveSnapshot()
+        {
+            try
+            {
+                var state = new SnapshotState
+                {
+                    Files = _previousSnapshot.ToDictionary(
+                        kv => kv.Key,
+                        kv => kv.Value.ToUniversalTime().Ticks,
+                        StringComparer.OrdinalIgnoreCase)
+                };
+
+                var json = JsonSerializer.Serialize(state, _jsonOptions);
+
+                var tmp = _snapshotStatePath + ".tmp";
+                File.WriteAllText(tmp, json);
+                File.Move(tmp, _snapshotStatePath, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to persist snapshot state: {ex.Message}");
+            }
+        }
+
+        private sealed class SnapshotState
+        {
+            public Dictionary<string, long> Files { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        }
+
         #endregion
     }
 }
