@@ -15,12 +15,6 @@ namespace FolderSync.App
 
         static void RunWithOptions(ConsoleArguments opts)
         {
-            Console.WriteLine($"Source path   : {opts.sourcePath}");
-            Console.WriteLine($"Replica path  : {opts.replicaFolder}");
-            Console.WriteLine($"Sync interval : {opts.syncInterval} miliseconds");
-            Console.WriteLine($"Log folder path : {opts.log}");
-
-
             try
             {
                 var syncFolder = new FolderSynchronizer(opts.sourcePath, opts.replicaFolder, opts.syncInterval, opts.log);

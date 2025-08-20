@@ -12,34 +12,33 @@ namespace FolderSync.Core
         private readonly string _sourceFolder;
         private readonly string _replicaFolder;
         private readonly int _syncInterval;
-        private readonly string _logFolderPath;
+        private readonly string _logFilePath;
 
         private Dictionary<string, DateTime> _fileLastModifiedTimes = new Dictionary<string, DateTime>();
 
-        public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logFolderPath)
+        public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logFilePath)
         {
             try
             {
-                // Configure log4net (only once per app domain)
+                // Configure log4net
                 var logRepository = LogManager.GetRepository(Assembly.GetEntryAssembly());
                 XmlConfigurator.Configure(logRepository, new FileInfo("log4net.config"));
 
-                // Set log file path dynamically for FileAppender
                 var fileAppender = logRepository.GetAppenders()
                     .OfType<log4net.Appender.FileAppender>()
                     .FirstOrDefault(a => a.Name == "FileAppender");
                 if (fileAppender != null)
                 {
-                    fileAppender.File = Path.Combine(logFolderPath, "file.log");
+                    fileAppender.File = logFilePath;
                     fileAppender.ActivateOptions();
                 }
 
-                ExceptionsCheck(sourceFolder, replicaFolder, syncInterval, logFolderPath);
+                ExceptionsCheck(sourceFolder, replicaFolder, syncInterval, logFilePath);
 
                 _sourceFolder = sourceFolder;
                 _replicaFolder = replicaFolder;
                 _syncInterval = syncInterval;
-                _logFolderPath = logFolderPath;
+                _logFilePath = logFilePath;
 
                 Logger.Info("FolderSynchronizer initialized.");
             }
@@ -54,7 +53,7 @@ namespace FolderSync.Core
         {
             try
             {
-                Logger.Info($"Starting folder synchronization. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalSeconds={_syncInterval}, LogFolder='{_logFolderPath}'");
+                Logger.Info($"Starting folder synchronization. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalSeconds={_syncInterval}, LogFilePath='{_logFilePath}'");
                 _fileLastModifiedTimes = GetAllFiles(_sourceFolder);
                 foreach (var file in _fileLastModifiedTimes)
                 {
@@ -113,7 +112,6 @@ namespace FolderSync.Core
                 if (!Directory.Exists(sourceFolder))
                     throw new DirectoryNotFoundException($"Source folder '{sourceFolder}' does not exist.");
 
-                // Replica folder: create if missing, don't throw
                 if (!Directory.Exists(replicaFolder))
                     Directory.CreateDirectory(replicaFolder);
 
