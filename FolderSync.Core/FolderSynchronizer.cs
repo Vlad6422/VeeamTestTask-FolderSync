@@ -55,12 +55,22 @@ namespace FolderSync.Core
             {
                 Logger.Info($"Starting folder synchronization. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalSeconds={_syncInterval}, LogFilePath='{_logFilePath}'");
                 _fileLastModifiedTimes = GetAllFiles(_sourceFolder);
+
                 foreach (var file in _fileLastModifiedTimes)
                 {
                     var sourceFilePath = Path.Combine(_sourceFolder, file.Key);
                     var replicaFilePath = Path.Combine(_replicaFolder, file.Key);
+
                     try
                     {
+                        // Ensure destination directory exists (fix for DirectoryNotFoundException)
+                        var replicaDir = Path.GetDirectoryName(replicaFilePath);
+                        if (!string.IsNullOrEmpty(replicaDir) && !Directory.Exists(replicaDir))
+                        {
+                            Directory.CreateDirectory(replicaDir);
+                            Logger.Debug($"Created replica subdirectory: '{replicaDir}'");
+                        }
+
                         File.Copy(sourceFilePath, replicaFilePath, true);
                         Logger.Info($"Copied '{sourceFilePath}' to '{replicaFilePath}'.");
                     }
@@ -69,6 +79,7 @@ namespace FolderSync.Core
                         Logger.Error($"Error copying '{sourceFilePath}' to '{replicaFilePath}': {fileEx.Message}", fileEx);
                     }
                 }
+
                 Logger.Info("Folder synchronization completed.");
             }
             catch (Exception ex)
