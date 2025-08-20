@@ -4,7 +4,7 @@ namespace VeeamTestTask_FolderSync
 {
     internal class ConsoleArguments
     {
-        [Option('s', "source", Required = true, HelpText = "Path to sorce folder.")]
+        [Option('s', "source", Required = true, HelpText = "Path to source folder.")]
         public required string sourcePath { get; set; }
 
         [Option('r', "replica", Required = true, HelpText = "Path to replica folder.")]
