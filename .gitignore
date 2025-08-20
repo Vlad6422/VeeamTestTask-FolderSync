@@ -363,3 +363,5 @@ MigrationBackup/
 FodyWeavers.xsd
 
 /Testing Folders/Source
+/Testing Folders/SyncFolder
+/FolderSync.App/Properties/launchSettings.json

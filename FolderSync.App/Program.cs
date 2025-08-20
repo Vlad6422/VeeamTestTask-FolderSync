@@ -9,44 +9,59 @@ namespace FolderSync.App
         static void Main(string[] args)
         {
             Parser.Default.ParseArguments<ConsoleArguments>(args)
-            .WithParsed(RunWithOptions)
-            .WithNotParsed(HandleErrors);
+                .WithParsed(RunWithOptions)
+                .WithNotParsed(HandleErrors);
         }
 
         static void RunWithOptions(ConsoleArguments opts)
         {
-            Console.WriteLine($"Source path   : {opts.sourcePath}");
-            Console.WriteLine($"Replica path  : {opts.replicaFolder}");
-            Console.WriteLine($"Sync interval : {opts.syncInterval} miliseconds");
-            Console.WriteLine($"Log folder path : {opts.log}");
-
-
             try
             {
                 var syncFolder = new FolderSynchronizer(opts.sourcePath, opts.replicaFolder, opts.syncInterval, opts.log);
-                try
+                using var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (s, e) =>
                 {
-                    syncFolder.SyncFolder();
-                }
-                catch (Exception ex)
+                    e.Cancel = true;
+                    cts.Cancel();
+                    Console.WriteLine("Cancellation requested. Finishing current cycle...");
+                };
+
+                while (!cts.IsCancellationRequested)
                 {
-                    Console.Error.WriteLine($"Error during synchronization: {ex.Message}");
+                    try
+                    {
+                        syncFolder.SyncFolder();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Error during synchronization cycle: {ex.Message}");
+                    }
+
+                    // Break immediately if cancelled after cycle
+                    if (cts.IsCancellationRequested) break;
+
+                    try
+                    {
+                        Task.Delay(opts.syncInterval, cts.Token).Wait();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
+
+                Console.WriteLine("Folder synchronization stopped.");
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error during initialization: {ex.Message}");
-                return;
-
             }
-
         }
-
 
         static void HandleErrors(IEnumerable<Error> errs)
         {
             Console.Error.WriteLine("Invalid arguments. Usage:");
-            Console.Error.WriteLine("FolderSync.exe -s \"C:\\Source\" -r \"C:\\SyncFolder\" -i 2000 -l \"C:\\Logs\"");
+            Console.Error.WriteLine("FolderSync.exe -s \"C:\\Source\" -r \"C:\\Replica\" -i 200 -l \"C:\\Logs\"");
         }
     }
 }

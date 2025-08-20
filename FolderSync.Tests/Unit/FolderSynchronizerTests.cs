@@ -48,13 +48,13 @@ namespace FolderSync.Tests.Unit
         }
 
         [Fact]
-        public void SyncFolder_DoesNotThrow_WhenReplicaAlreadyHasExtraFiles()
+        public void SyncFolder_RemovesExtraneousFilesFromReplica()
         {
-            // Arrange
+            // Arrange: source has one file; replica has that plus an extraneous file
             var sourceFile = Path.Combine(_source, "OnlyInSource.txt");
             File.WriteAllText(sourceFile, "Payload");
             var extraReplicaFile = Path.Combine(_replica, "OnlyInReplica.txt");
-            File.WriteAllText(extraReplicaFile, "ShouldStay");
+            File.WriteAllText(extraReplicaFile, "ShouldBeDeleted");
 
             var sut = new FolderSynchronizer(_source, _replica, 500, _logs);
 
@@ -64,8 +64,7 @@ namespace FolderSync.Tests.Unit
             // Assert
             Assert.Null(ex);
             Assert.True(File.Exists(Path.Combine(_replica, "OnlyInSource.txt")));
-            // We do not delete extraneous files (current implementation), so ensure it still exists.
-            Assert.True(File.Exists(extraReplicaFile));
+            Assert.False(File.Exists(extraReplicaFile), "Extraneous file should be removed to mirror the source.");
         }
 
         [Fact]
@@ -95,7 +94,7 @@ namespace FolderSync.Tests.Unit
             }
             catch
             {
-                // Ehhhh, best effort cleanup
+                // Best effort cleanup
             }
         }
     }

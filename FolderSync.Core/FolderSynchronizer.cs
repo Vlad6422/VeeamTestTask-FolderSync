@@ -5,131 +5,140 @@ using System.Reflection;
 
 namespace FolderSync.Core
 {
-    public class FolderSynchronizer : ISyncFolder
+    public sealed class FolderSynchronizer : ISyncFolder
     {
         private static readonly ILog Logger = LogManager.GetLogger(typeof(FolderSynchronizer));
 
         private readonly string _sourceFolder;
         private readonly string _replicaFolder;
-        private readonly int _syncInterval;
-        private readonly string _logFolderPath;
+        private readonly int _syncIntervalMilliseconds;
+        private readonly string _logFilePath;
 
-        private Dictionary<string, DateTime> _fileLastModifiedTimes = new Dictionary<string, DateTime>();
+        private readonly IFolderSnapshotProvider _snapshotProvider;
+        private readonly IFileCopyService _fileCopyService;
+        private readonly IReplicaMaintenance _replicaMaintenance;
 
-        public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logFolderPath)
+        private Dictionary<string, DateTime> _previousSnapshot = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _syncLock = new();
+
+        #region Constructors / Factory
+
+        // Primary DI-friendly constructor
+        public FolderSynchronizer(
+            FolderSyncOptions options,
+            IFolderSnapshotProvider snapshotProvider,
+            IFileCopyService fileCopyService,
+            IReplicaMaintenance replicaMaintenance)
+        {
+            (_sourceFolder, _replicaFolder, _syncIntervalMilliseconds, _logFilePath) = options.NormalizeAndValidate();
+
+            _snapshotProvider = snapshotProvider;
+            _fileCopyService = fileCopyService;
+            _replicaMaintenance = replicaMaintenance;
+
+            ConfigureLogging();
+            Logger.Info($"FolderSynchronizer initialized. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalMs={_syncIntervalMilliseconds}, LogFile='{_logFilePath}'");
+        }
+
+        // Backwards-compatible convenience constructor
+        public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logPath)
+            : this(new FolderSyncOptions(sourceFolder, replicaFolder, syncInterval, logPath),
+                snapshotProvider: new FolderSnapshotProvider(),
+                fileCopyService: new RetryingFileCopyService(),
+                replicaMaintenance: new ReplicaMaintenance(new FolderSnapshotProvider()))
+        {
+        }
+
+        private void ConfigureLogging()
         {
             try
             {
-                // Configure log4net (only once per app domain)
                 var logRepository = LogManager.GetRepository(Assembly.GetEntryAssembly());
                 XmlConfigurator.Configure(logRepository, new FileInfo("log4net.config"));
 
-                // Set log file path dynamically for FileAppender
                 var fileAppender = logRepository.GetAppenders()
                     .OfType<log4net.Appender.FileAppender>()
                     .FirstOrDefault(a => a.Name == "FileAppender");
                 if (fileAppender != null)
                 {
-                    fileAppender.File = Path.Combine(logFolderPath, "file.log");
+                    fileAppender.File = _logFilePath;
                     fileAppender.ActivateOptions();
                 }
-
-                ExceptionsCheck(sourceFolder, replicaFolder, syncInterval, logFolderPath);
-
-                _sourceFolder = sourceFolder;
-                _replicaFolder = replicaFolder;
-                _syncInterval = syncInterval;
-                _logFolderPath = logFolderPath;
-
-                Logger.Info("FolderSynchronizer initialized.");
             }
             catch (Exception ex)
             {
-                Logger.Error("Exception during FolderSynchronizer initialization", ex);
+                // Last resort logging
+                Logger.Error("Exception during logging configuration", ex);
                 throw;
             }
         }
 
+        #endregion
+
         public void SyncFolder()
         {
+            if (!Monitor.TryEnter(_syncLock))
+            {
+                Logger.Warn("Sync attempt skipped; previous sync still running.");
+                return;
+            }
+
             try
             {
-                Logger.Info("Starting folder synchronization.");
-                _fileLastModifiedTimes = GetAllFiles(_sourceFolder);
-                foreach (var file in _fileLastModifiedTimes)
-                {
-                    var sourceFilePath = Path.Combine(_sourceFolder, file.Key);
-                    var replicaFilePath = Path.Combine(_replicaFolder, file.Key);
-                    try
-                    {
-                        File.Copy(sourceFilePath, replicaFilePath, true);
-                        Logger.Info($"Copied '{sourceFilePath}' to '{replicaFilePath}'.");
-                    }
-                    catch (Exception fileEx)
-                    {
-                        Logger.Error($"Error copying '{sourceFilePath}' to '{replicaFilePath}': {fileEx.Message}", fileEx);
-                    }
-                }
-                Logger.Info("Folder synchronization completed.");
+                var currentSnapshot = _snapshotProvider.GetSnapshot(_sourceFolder);
+                CopyOrUpdateFiles(currentSnapshot);
+                _replicaMaintenance.DeleteExtraneousFiles(_sourceFolder, _replicaFolder, currentSnapshot);
+                _replicaMaintenance.PruneEmptyDirectories(_replicaFolder);
+
+                _previousSnapshot = currentSnapshot;
+                Logger.Info("Synchronization cycle completed.");
             }
             catch (Exception ex)
             {
-                Logger.Error("Error during folder synchronization", ex);
+                Logger.Error("Unexpected error during synchronization cycle", ex);
                 throw;
+            }
+            finally
+            {
+                Monitor.Exit(_syncLock);
             }
         }
 
         #region Private Methods
-
-        private Dictionary<string, DateTime> GetAllFiles(string folderPath)
+        private void CopyOrUpdateFiles(Dictionary<string, DateTime> currentSnapshot)
         {
-            var files = new Dictionary<string, DateTime>();
-            try
+            foreach (var (relativePath, currentLastWriteUtc) in currentSnapshot)
             {
-                foreach (var file in Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories))
+                var src = Path.Combine(_sourceFolder, relativePath);
+                var dst = Path.Combine(_replicaFolder, relativePath);
+
+                var needsCopy =
+                    !_previousSnapshot.TryGetValue(relativePath, out var prevWriteUtc) ||
+                    prevWriteUtc != currentLastWriteUtc ||
+                    !File.Exists(dst);
+
+                if (!needsCopy)
+                    continue;
+
+                try
                 {
-                    var relativePath = Path.GetRelativePath(folderPath, file);
-                    files[relativePath] = File.GetLastWriteTime(file);
+                    _fileCopyService.CopyFile(src, dst, overwrite: true, retries: 2, retryDelayMs: 50);
+
+                    if (!_previousSnapshot.ContainsKey(relativePath))
+                        Logger.Info($"Copied NEW file '{src}' -> '{dst}'.");
+                    else
+                        Logger.Info($"{src} -> {dst}");
+                }
+                catch (FileNotFoundException)
+                {
+                    Logger.Warn($"Skipped copy (source vanished mid-operation): '{src}'.");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"Failed copying '{src}' -> '{dst}': {ex.Message}", ex);
                 }
             }
-            catch (Exception ex)
-            {
-                Logger.Error($"Error getting files from folder '{folderPath}': {ex.Message}", ex);
-                throw;
-            }
-            return files;
         }
-
-        private void ExceptionsCheck(string sourceFolder, string replicaFolder, int syncInterval, string logFilePath)
-        {
-            try
-            {
-                ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder, nameof(sourceFolder));
-                ArgumentException.ThrowIfNullOrWhiteSpace(replicaFolder, nameof(replicaFolder));
-                ArgumentException.ThrowIfNullOrWhiteSpace(logFilePath, nameof(logFilePath));
-                if (syncInterval <= 0)
-                    throw new ArgumentOutOfRangeException(nameof(syncInterval), "Sync interval must be greater than zero.");
-
-                if (!Directory.Exists(sourceFolder))
-                    throw new DirectoryNotFoundException($"Source folder '{sourceFolder}' does not exist.");
-
-                // Replica folder: create if missing, don't throw
-                if (!Directory.Exists(replicaFolder))
-                    Directory.CreateDirectory(replicaFolder);
-
-                var logDir = Path.GetDirectoryName(logFilePath);
-                if (string.IsNullOrWhiteSpace(logDir))
-                    throw new ArgumentException("Log file path must include a directory.", nameof(logFilePath));
-                if (!Directory.Exists(logDir))
-                    Directory.CreateDirectory(logDir);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("Exception during parameter validation", ex);
-                throw;
-            }
-        }
-
-        #endregion 
+        #endregion
     }
 }
