@@ -54,7 +54,7 @@ namespace FolderSync.Core
         {
             try
             {
-                Logger.Info("Starting folder synchronization.");
+                Logger.Info($"Starting folder synchronization. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalSeconds={_syncInterval}, LogFolder='{_logFolderPath}'");
                 _fileLastModifiedTimes = GetAllFiles(_sourceFolder);
                 foreach (var file in _fileLastModifiedTimes)
                 {
