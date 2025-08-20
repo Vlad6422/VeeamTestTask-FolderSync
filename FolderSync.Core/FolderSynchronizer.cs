@@ -11,36 +11,32 @@ namespace FolderSync.Core
 
         private readonly string _sourceFolder;
         private readonly string _replicaFolder;
-        private readonly int _syncInterval;
+        private readonly int _syncIntervalMilliseconds;
         private readonly string _logFilePath;
 
-        private Dictionary<string, DateTime> _fileLastModifiedTimes = new Dictionary<string, DateTime>();
+        // Stores the last successfully synchronized LastWriteTime for each relative file path
+        private Dictionary<string, DateTime> _fileLastModifiedTimes = new();
 
-        public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logFilePath)
+        public FolderSynchronizer(string sourceFolder, string replicaFolder, int syncInterval, string logPath)
         {
             try
             {
-                // Configure log4net
                 var logRepository = LogManager.GetRepository(Assembly.GetEntryAssembly());
                 XmlConfigurator.Configure(logRepository, new FileInfo("log4net.config"));
+
+                (_sourceFolder, _replicaFolder, _syncIntervalMilliseconds, _logFilePath) =
+                    ValidateAndNormalizeParameters(sourceFolder, replicaFolder, syncInterval, logPath);
 
                 var fileAppender = logRepository.GetAppenders()
                     .OfType<log4net.Appender.FileAppender>()
                     .FirstOrDefault(a => a.Name == "FileAppender");
                 if (fileAppender != null)
                 {
-                    fileAppender.File = logFilePath;
+                    fileAppender.File = _logFilePath;
                     fileAppender.ActivateOptions();
                 }
 
-                ExceptionsCheck(sourceFolder, replicaFolder, syncInterval, logFilePath);
-
-                _sourceFolder = sourceFolder;
-                _replicaFolder = replicaFolder;
-                _syncInterval = syncInterval;
-                _logFilePath = logFilePath;
-
-                Logger.Info("FolderSynchronizer initialized.");
+                Logger.Info($"FolderSynchronizer initialized. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalMs={_syncIntervalMilliseconds}, LogFile='{_logFilePath}'");
             }
             catch (Exception ex)
             {
@@ -53,17 +49,28 @@ namespace FolderSync.Core
         {
             try
             {
-                Logger.Info($"Starting folder synchronization. Source='{_sourceFolder}', Replica='{_replicaFolder}', IntervalSeconds={_syncInterval}, LogFilePath='{_logFilePath}'");
-                _fileLastModifiedTimes = GetAllFiles(_sourceFolder);
+                // Take a fresh snapshot of the source
+                var currentSnapshot = GetAllFiles(_sourceFolder);
 
-                foreach (var file in _fileLastModifiedTimes)
+                // Copy / update changed or new files
+                foreach (var kvp in currentSnapshot)
                 {
-                    var sourceFilePath = Path.Combine(_sourceFolder, file.Key);
-                    var replicaFilePath = Path.Combine(_replicaFolder, file.Key);
+                    var relativePath = kvp.Key;
+                    var currentLastWrite = kvp.Value;
+
+                    var sourceFilePath = Path.Combine(_sourceFolder, relativePath);
+                    var replicaFilePath = Path.Combine(_replicaFolder, relativePath);
+
+                    // Determine whether this file is new or modified
+                    var shouldCopy = !_fileLastModifiedTimes.TryGetValue(relativePath, out var previousLastWrite)
+                                     || previousLastWrite != currentLastWrite
+                                     || !File.Exists(replicaFilePath); // safety fallback
+
+                    if (!shouldCopy)
+                        continue;
 
                     try
                     {
-                        // Ensure destination directory exists (fix for DirectoryNotFoundException)
                         var replicaDir = Path.GetDirectoryName(replicaFilePath);
                         if (!string.IsNullOrEmpty(replicaDir) && !Directory.Exists(replicaDir))
                         {
@@ -72,73 +79,119 @@ namespace FolderSync.Core
                         }
 
                         File.Copy(sourceFilePath, replicaFilePath, true);
-                        Logger.Info($"Copied '{sourceFilePath}' to '{replicaFilePath}'.");
+                        if (!_fileLastModifiedTimes.ContainsKey(relativePath))
+                            Logger.Info($"Copied NEW file '{sourceFilePath}' -> '{replicaFilePath}'.");
+                        else
+                            Logger.Info($"Updated file '{sourceFilePath}' -> '{replicaFilePath}'.");
                     }
                     catch (Exception fileEx)
                     {
-                        Logger.Error($"Error copying '{sourceFilePath}' to '{replicaFilePath}': {fileEx.Message}", fileEx);
+                        Logger.Error($"Error copying/updating '{sourceFilePath}' to '{replicaFilePath}': {fileEx.Message}", fileEx);
                     }
                 }
 
-                Logger.Info("Folder synchronization completed.");
+                // Remove extraneous files from replica (those not present in current snapshot)
+                var replicaFiles = GetAllFiles(_replicaFolder);
+                var toDelete = replicaFiles.Keys.Except(currentSnapshot.Keys).ToList();
+                foreach (var relative in toDelete)
+                {
+                    try
+                    {
+                        var fullPath = Path.Combine(_replicaFolder, relative);
+                        File.Delete(fullPath);
+                        Logger.Info($"Deleted extraneous file '{fullPath}'.");
+                    }
+                    catch (Exception delEx)
+                    {
+                        Logger.Error($"Error deleting extraneous file '{relative}': {delEx.Message}", delEx);
+                    }
+                }
+
+                // Prune empty directories
+                try
+                {
+                    var dirs = Directory.GetDirectories(_replicaFolder, "*", SearchOption.AllDirectories)
+                        .OrderByDescending(d => d.Length);
+                    foreach (var dir in dirs)
+                    {
+                        if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                        {
+                            Directory.Delete(dir);
+                            Logger.Debug($"Removed empty directory '{dir}'.");
+                        }
+                    }
+                }
+                catch (Exception dirEx)
+                {
+                    Logger.Warn($"Error while pruning empty directories: {dirEx.Message}");
+                }
+
+                // Promote snapshot to become the "last synchronized" state
+                _fileLastModifiedTimes = currentSnapshot;
+
+                Logger.Info("Synchronization cycle completed.");
             }
             catch (Exception ex)
             {
-                Logger.Error("Error during folder synchronization", ex);
+                Logger.Error("Error during folder synchronization cycle", ex);
                 throw;
             }
         }
 
-        #region Private Methods
+        #region Private Helpers
 
         private Dictionary<string, DateTime> GetAllFiles(string folderPath)
         {
             var files = new Dictionary<string, DateTime>();
-            try
+            foreach (var file in Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories))
             {
-                foreach (var file in Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories))
-                {
-                    var relativePath = Path.GetRelativePath(folderPath, file);
-                    files[relativePath] = File.GetLastWriteTime(file);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"Error getting files from folder '{folderPath}': {ex.Message}", ex);
-                throw;
+                var relativePath = Path.GetRelativePath(folderPath, file);
+                // Using local time is fine here; if you need cross-timezone precision switch to GetLastWriteTimeUtc
+                files[relativePath] = File.GetLastWriteTime(file);
             }
             return files;
         }
 
-        private void ExceptionsCheck(string sourceFolder, string replicaFolder, int syncInterval, string logFilePath)
+        private static (string source, string replica, int intervalMs, string logFile) ValidateAndNormalizeParameters(
+            string sourceFolder,
+            string replicaFolder,
+            int syncInterval,
+            string logPath)
         {
-            try
+            ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder, nameof(sourceFolder));
+            ArgumentException.ThrowIfNullOrWhiteSpace(replicaFolder, nameof(replicaFolder));
+            ArgumentException.ThrowIfNullOrWhiteSpace(logPath, nameof(logPath));
+            if (syncInterval <= 0)
+                throw new ArgumentOutOfRangeException(nameof(syncInterval), "Sync interval must be greater than zero (milliseconds).");
+
+            if (!Directory.Exists(sourceFolder))
+                throw new DirectoryNotFoundException($"Source folder '{sourceFolder}' does not exist.");
+
+            if (!Directory.Exists(replicaFolder))
+                Directory.CreateDirectory(replicaFolder);
+
+            string finalLogFilePath;
+            if (Directory.Exists(logPath) || !Path.HasExtension(logPath))
             {
-                ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder, nameof(sourceFolder));
-                ArgumentException.ThrowIfNullOrWhiteSpace(replicaFolder, nameof(replicaFolder));
-                ArgumentException.ThrowIfNullOrWhiteSpace(logFilePath, nameof(logFilePath));
-                if (syncInterval <= 0)
-                    throw new ArgumentOutOfRangeException(nameof(syncInterval), "Sync interval must be greater than zero.");
-
-                if (!Directory.Exists(sourceFolder))
-                    throw new DirectoryNotFoundException($"Source folder '{sourceFolder}' does not exist.");
-
-                if (!Directory.Exists(replicaFolder))
-                    Directory.CreateDirectory(replicaFolder);
-
-                var logDir = Path.GetDirectoryName(logFilePath);
-                if (string.IsNullOrWhiteSpace(logDir))
-                    throw new ArgumentException("Log file path must include a directory.", nameof(logFilePath));
-                if (!Directory.Exists(logDir))
-                    Directory.CreateDirectory(logDir);
+                if (!Directory.Exists(logPath))
+                {
+                    Directory.CreateDirectory(logPath);
+                }
+                finalLogFilePath = Path.Combine(logPath, "file.log");
             }
-            catch (Exception ex)
+            else
             {
-                Logger.Error("Exception during parameter validation", ex);
-                throw;
+                var dir = Path.GetDirectoryName(logPath);
+                if (string.IsNullOrWhiteSpace(dir))
+                    throw new ArgumentException("Log file path must include a directory.", nameof(logPath));
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                finalLogFilePath = logPath;
             }
+
+            return (sourceFolder, replicaFolder, syncInterval, finalLogFilePath);
         }
 
-        #endregion 
+        #endregion
     }
 }

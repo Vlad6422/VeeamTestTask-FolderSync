@@ -43,7 +43,7 @@ namespace FolderSync.Tests.E2E
             return exePath;
         }
 
-        private (int exitCode, string stdOut, string stdErr) RunApp(params string[] args)
+        private Process StartApp(StringBuilder stdout, StringBuilder stderr, params string[] args)
         {
             var psi = new ProcessStartInfo
             {
@@ -57,14 +57,11 @@ namespace FolderSync.Tests.E2E
             };
 
             var proc = Process.Start(psi)!;
-            var stdout = new StringBuilder();
-            var stderr = new StringBuilder();
             proc.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
             proc.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
-            proc.WaitForExit(30_000);
-            return (proc.ExitCode, stdout.ToString(), stderr.ToString());
+            return proc;
         }
 
         [Fact]
@@ -76,18 +73,28 @@ namespace FolderSync.Tests.E2E
             File.WriteAllText(Path.Combine(_source, "fileB.txt"), "Bravo");
             File.WriteAllText(Path.Combine(nestedDir, "deep.txt"), "Deep");
 
-            File.WriteAllText(Path.Combine(_replica, "fileA.txt"), "OLD" );
+            File.WriteAllText(Path.Combine(_replica, "fileA.txt"), "OLD");
             File.WriteAllText(Path.Combine(_replica, "extraneous.txt"), "REMOVE_ME");
 
-            var (exitCode, stdOut, stdErr) = RunApp(
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            var proc = StartApp(stdout, stderr,
                 "-s", _source,
                 "-r", _replica,
                 "-i", "200",
                 "-l", _logs
             );
 
-            Assert.Equal(0, exitCode);
-            Assert.Contains("Source path", stdOut);
+            // Allow at least one cycle (interval=200ms) plus margin
+            Thread.Sleep(600);
+
+            // Terminate the continuously running process after first cycle
+            if (!proc.HasExited)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                try { proc.WaitForExit(2_000); } catch { }
+            }
+
             Assert.True(File.Exists(Path.Combine(_logs, "file.log")), "Log file was not created.");
             var logContent = File.ReadAllText(Path.Combine(_logs, "file.log"));
             Assert.Contains("Copied", logContent);
@@ -101,6 +108,9 @@ namespace FolderSync.Tests.E2E
                 Assert.True(replicaFiles.ContainsKey(kv.Key), $"Replica missing '{kv.Key}'");
                 Assert.Equal(kv.Value, replicaFiles[kv.Key]);
             }
+
+            // Ensure extraneous file removed
+            Assert.False(File.Exists(Path.Combine(_replica, "extraneous.txt")));
         }
 
         [Fact]
@@ -108,27 +118,23 @@ namespace FolderSync.Tests.E2E
         {
             File.WriteAllText(Path.Combine(_source, "initial.txt"), "V1");
 
-            var exePath = GetAppExecutablePath();
-            var psi = new ProcessStartInfo
-            {
-                FileName = exePath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Arguments = string.Join(' ', new[] {"-s", _source, "-r", _replica, "-i", "200", "-l", _logs})
-            };
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            using var proc = StartApp(stdout, stderr,
+                "-s", _source,
+                "-r", _replica,
+                "-i", "200",
+                "-l", _logs
+            );
 
-            using var proc = Process.Start(psi)!;
-            proc.WaitForExit(1_000);
+            // Wait for first cycle
+            Thread.Sleep(500);
 
             File.WriteAllText(Path.Combine(_source, "initial.txt"), "V2");
             File.WriteAllText(Path.Combine(_source, "added.txt"), "NEW");
 
-            if (!proc.HasExited)
-            {
-                proc.WaitForExit(1_000);
-            }
+            // Wait for second cycle
+            Thread.Sleep(500);
 
             if (!proc.HasExited)
             {
