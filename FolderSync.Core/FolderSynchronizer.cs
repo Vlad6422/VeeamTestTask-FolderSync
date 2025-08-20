@@ -1,6 +1,7 @@
 ﻿using FolderSync.Contracts;
 using log4net;
 using log4net.Config;
+using log4net.Repository;
 using System.Reflection;
 
 namespace FolderSync.Core
@@ -53,7 +54,11 @@ namespace FolderSync.Core
         {
             try
             {
-                var logRepository = LogManager.GetRepository(Assembly.GetEntryAssembly());
+                var entryAssembly = Assembly.GetEntryAssembly();
+                if (entryAssembly == null)
+                    throw new InvalidOperationException("Entry assembly is null. Cannot configure logging repository.");
+
+                var logRepository = LogManager.GetRepository(entryAssembly);
                 XmlConfigurator.Configure(logRepository, new FileInfo("log4net.config"));
 
                 var fileAppender = logRepository.GetAppenders()

@@ -22,7 +22,7 @@ public class FolderSynchronizerExtendedTests : IDisposable
     }
 
     [Fact]
-    public void SyncFolder_Skips_WhenAlreadyRunning()
+    public async Task SyncFolder_Skips_WhenAlreadyRunning()
     {
         var fakeSnapshot = new BlockingSnapshotProvider(delayMs: 200); // slow snapshot to hold lock
         var sync = new FolderSynchronizer(
@@ -32,9 +32,9 @@ public class FolderSynchronizerExtendedTests : IDisposable
             new ReplicaMaintenance(new FolderSnapshotProvider()));
 
         var t1 = Task.Run(() => sync.SyncFolder());
-        Thread.Sleep(20); // ensure first acquired lock
+        await Task.Delay(20); // ensure first acquired lock
         sync.SyncFolder(); // should skip, not throw
-        t1.Wait();
+        await t1;
         Assert.True(fakeSnapshot.Calls >= 1);
     }
 
