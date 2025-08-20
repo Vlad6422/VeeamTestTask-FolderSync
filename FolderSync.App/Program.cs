@@ -1,11 +1,11 @@
 ﻿using CommandLine;
-using VeeamTestTask_FolderSync.Core;
+using FolderSync.Core;
+using FolderSync.App.ArgumentsParser;
 
-namespace VeeamTestTask_FolderSync
+namespace FolderSync.App
 {
     internal class Program
     {
-        // 
         static void Main(string[] args)
         {
             Parser.Default.ParseArguments<ConsoleArguments>(args)

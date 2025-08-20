@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "VeeamTestTask-FolderSync": {
+    "FolderSync": {
       "commandName": "Project",
       "commandLineArgs": "-s \"C:\\Programming\\TestTechnicalTasks\\VeeamTestTask-FolderSync\\Testing Folders\\Source\" -r \"C:\\Programming\\TestTechnicalTasks\\VeeamTestTask-FolderSync\\Testing Folders\\SyncFolder\" -i 2000 -l \"C:\\Programming\\TestTechnicalTasks\\VeeamTestTask-FolderSync\\Testing Folders\\Logs\""
     }
