@@ -1,5 +1,14 @@
 # VeeamTestTask-FolderSync
 
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [How to Run](#how-to-run)
+- [Where It Can Be Used](#where-it-can-be-used)
+- [Build and Run Example](#build-and-run-example)
+- [Examples](#examples)
+- [Log Message Examples](#log-message-examples)
+
 
 ## Overview
 This is a simple folder synchronization console app.
@@ -47,7 +56,7 @@ FolderSync.exe -s "C:\Source" -r "C:\Replica" -i 2000 -l "C:\Logs\sync.log"
 ## Where It Can Be Used
 - Keeping a backup folder in sync with a main folder (even remote, virtual machine, server)
 
-## Example
+## Build and Run Example
 
 ```
 dotnet run --project FolderSync.App -- -s "C:\Data\Source" -r "C:\Data\Replica" -i 5000 -l "C:\Logs\sync.log"
@@ -56,7 +65,6 @@ dotnet run --project FolderSync.App -- -s "C:\Data\Source" -r "C:\Data\Replica" 
 
 This will synchronize `C:\Data\Source` to `C:\Data\Replica` every 5 seconds, logging to `C:\Logs\sync.log`.
 
----
 
 ## Examples
 
